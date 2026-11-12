@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#eff6ff">
+<title>Packing Tracker — Camera Trial</title>
+<style>
+:root{font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;color:#172033;background:#f3f7fc}
+*{box-sizing:border-box}body{margin:0;padding:16px 13px 36px}.app{max-width:760px;margin:auto}
+header{display:flex;justify-content:space-between;align-items:center;gap:10px;margin:5px 0 17px}
+.brand{font-weight:850;font-size:20px;letter-spacing:-.6px}.muted{color:#718096;font-size:12px;line-height:1.5}
+.pill{background:#dbeafe;color:#1d4ed8;border-radius:99px;padding:7px 10px;font-size:10px;font-weight:800}
+.card{background:#fff;border:1px solid #e5eaf2;border-radius:18px;padding:15px;margin:12px 0;box-shadow:0 5px 18px #18345b08}
+h2{font-size:15px;margin:0 0 9px}.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.stat{background:#f6f8fb;border-radius:13px;padding:11px}.num{font-size:26px;font-weight:850;letter-spacing:-1px}.label{font-size:10px;color:#718096}
+.progress{height:9px;border-radius:99px;background:#edf1f6;overflow:hidden;margin-top:8px}.bar{height:100%;background:#16a36a;width:0;transition:width .2s}
+button{border:0;border-radius:12px;padding:13px 14px;font-weight:750;font-size:13px;cursor:pointer}
+.primary{background:#2563eb;color:#fff;width:100%}.secondary{background:#eef2f7;color:#334155}.danger{background:#fff1f2;color:#be123c}
+.file{display:block;border:1.5px dashed #b9c7d9;border-radius:13px;padding:13px;text-align:center;margin-top:10px;background:#f9fbfe}
+.file input{display:block;width:100%;margin-top:8px;font-size:12px}
+#cameraWrap{display:none;background:#09111e;border-radius:15px;overflow:hidden;position:relative;margin-top:12px}
+video{width:100%;display:block;max-height:420px;object-fit:cover}.frame{position:absolute;left:12%;right:12%;top:24%;height:43%;border:2px solid #6ee7b7;border-radius:18px;box-shadow:0 0 0 999px #0003;pointer-events:none}
+.hint{color:#fff;text-align:center;background:#09111e;padding:9px;font-size:11px}
+.actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+.msg{padding:12px;border-radius:12px;background:#f1f5f9;font-size:12px;line-height:1.45;margin-top:10px}
+.msg.ok{background:#ecfdf5;color:#065f46}.msg.warn{background:#fffbeb;color:#92400e}.msg.bad{background:#fff1f2;color:#9f1239}
+.filters{display:flex;gap:7px;flex-wrap:wrap;margin:10px 0}.filters button{padding:8px 11px;font-size:11px}.filters .active{background:#172033;color:#fff}
+.tablewrap{max-height:330px;overflow:auto}table{width:100%;border-collapse:collapse;font-size:11px}
+th,td{text-align:left;padding:10px 5px;border-bottom:1px solid #edf1f6}th{color:#718096;position:sticky;top:0;background:#fff}
+.status{font-size:9px;font-weight:850;padding:5px 7px;border-radius:99px;white-space:nowrap}
+.pending{background:#fff7ed;color:#c2410c}.packed{background:#dcfce7;color:#166534}
+.last{display:none;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:13px;padding:12px;margin-top:10px}
+.last strong{font-size:15px}.small{font-size:11px;color:#64748b;margin-top:4px}
+footer{font-size:10px;color:#8792a5;text-align:center;line-height:1.5;margin:18px 8px}
+@media(min-width:600px){body{padding:26px}.card{padding:19px}}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+</head>
+<body><main class="app">
+<header><div><div class="brand">📦 Packing Tracker</div><div class="muted">Tes kamera QR resi · Batch lokal</div></div><div class="pill">CAMERA TRIAL</div></header>
+<section class="card">
+<h2>1. Muat batch resi</h2>
+<div class="muted">Pilih CSV batch yang sudah disiapkan. File diproses di HP dan tidak diunggah ke GitHub.</div>
+<label class="file">📄 Pilih packing-batch.csv<input id="csvFile" type="file" accept=".csv,text/csv"></label>
+<div id="batchMsg" class="msg">Belum ada batch dimuat.</div>
+</section>
+<section class="card">
+<h2>2. Monitor packing</h2>
+<div class="stats">
+<div class="stat"><div class="num" id="total">0</div><div class="label">Total resi</div></div>
+<div class="stat"><div class="num" id="packed" style="color:#059669">0</div><div class="label">Sudah scan</div></div>
+<div class="stat"><div class="num" id="pending" style="color:#d97706">0</div><div class="label">Belum scan</div></div>
+</div>
+<div style="display:flex;justify-content:space-between;margin-top:14px;font-size:11px;font-weight:750"><span>Progress packing</span><span id="percent">0%</span></div>
+<div class="progress"><div class="bar" id="bar"></div></div>
+</section>
+<section class="card">
+<h2>3. Scan resi langsung</h2>
+<p class="muted">Tekan mulai kamera, izinkan kamera belakang, lalu arahkan QR pada resi ke kotak. Jika AWB cocok dengan batch, status langsung berubah menjadi PACKED tanpa input manual.</p>
+<div id="cameraWrap"><video id="video" autoplay muted playsinline></video><div class="frame"></div><div class="hint">Arahkan QR resi ke dalam kotak</div></div>
+<div class="actions"><button class="primary" id="startBtn">▶ Mulai kamera</button><button class="secondary" id="stopBtn" disabled>■ Hentikan</button></div>
+<div id="message" class="msg">Kamera belum aktif.</div>
+<div id="last" class="last"><div style="font-size:10px;color:#047857;font-weight:850">SCAN BERHASIL</div><strong id="lastAwb"></strong><div class="small" id="lastOrder"></div></div>
+</section>
+<section class="card">
+<h2>4. Daftar resi</h2>
+<div class="filters">
+<button class="secondary active" data-filter="all">Semua <span id="allN">0</span></button>
+<button class="secondary" data-filter="pending">Pending <span id="pendingN">0</span></button>
+<button class="secondary" data-filter="packed">Packed <span id="packedN">0</span></button>
+</div>
+<div class="tablewrap"><table><thead><tr><th>AWB</th><th>Kurir</th><th>Status</th></tr></thead><tbody id="rows"></tbody></table></div>
+<div class="actions"><button class="secondary" id="exportBtn">Export hasil CSV</button><button class="danger" id="resetBtn">Reset scan</button></div>
+</section>
+<footer>Trial ini menyimpan batch dan hasil scan di browser HP (localStorage). GitHub Pages hanya hosting HTTPS; belum ada sinkronisasi ke laptop admin. Jangan masukkan data pelanggan sensitif ke repository publik.</footer>
+</main>
+<script>
+const $=id=>document.getElementById(id),BATCH_KEY="packing-tracker-batch-v1",SCAN_KEY="packing-tracker-scans-v1";
+let batch=[],scans={},stream=null,running=false,filter="all",lastValue="",lastTime=0,canvas=document.createElement("canvas"),ctx=canvas.getContext("2d",{willReadFrequently:true});
+try{batch=JSON.parse(localStorage.getItem(BATCH_KEY)||"[]");scans=JSON.parse(localStorage.getItem(SCAN_KEY)||"{}")}catch(e){batch=[];scans={}}
+const norm=v=>String(v||"").trim().toUpperCase().replace(/\s+/g,"");
+function parseCSV(t){
+ let rows=[],row=[],cell="",q=false;
+ for(let i=0;i<t.length;i++){let c=t[i],n=t[i+1];if(c==='"'&&q&&n==='"'){cell+='"';i++}else if(c==='"')q=!q;else if(c===','&&!q){row.push(cell);cell=""}else if((c==='\n'||c==='\r')&&!q){if(c==='\r'&&n==='\n')i++;row.push(cell);if(row.some(x=>x.trim()))rows.push(row);row=[];cell=""}else cell+=c}
+ row.push(cell);if(row.some(x=>x.trim()))rows.push(row);if(!rows.length)return[];
+ const h=rows.shift().map(x=>x.trim().toLowerCase().replace(/^\uFEFF/,""));
+ const ai=h.findIndex(x=>["awb","tracking id","tracking number","no resi","resi"].includes(x)),oi=h.findIndex(x=>["order id","order_id"].includes(x)),ci=h.findIndex(x=>["courier","kurir","shipping provider"].includes(x));
+ if(ai<0)throw Error("Kolom AWB tidak ditemukan. Pastikan CSV memiliki header AWB.");
+ const m=new Map();rows.forEach(r=>{const a=norm(r[ai]);if(a&&!m.has(a))m.set(a,{awb:a,order:oi>=0?(r[oi]||""):"",courier:ci>=0?(r[ci]||""):""})});return [...m.values()]
+}
+function setMsg(t,c=""){$("message").className="msg "+c;$("message").textContent=t}
+function render(){
+ const done=batch.filter(x=>scans[x.awb]).length,pending=batch.length-done;
+ $("total").textContent=batch.length;$("packed").textContent=done;$("pending").textContent=pending;
+ $("percent").textContent=(batch.length?Math.round(done/batch.length*100):0)+"%";
+ $("bar").style.width=(batch.length?done/batch.length*100:0)+"%";
+ $("allN").textContent=batch.length;$("pendingN").textContent=pending;$("packedN").textContent=done;$("rows").innerHTML="";
+ batch.filter(x=>filter==="all"||(filter==="packed"?!!scans[x.awb]:!scans[x.awb])).forEach(x=>{
+  const tr=document.createElement("tr"),a=document.createElement("td"),c=document.createElement("td"),s=document.createElement("td"),b=document.createElement("span");
+  a.textContent=x.awb;c.textContent=x.courier||"—";b.className="status "+(scans[x.awb]?"packed":"pending");b.textContent=scans[x.awb]?"PACKED":"PENDING";s.appendChild(b);tr.append(a,c,s);$("rows").appendChild(tr)
+ });
+ document.querySelectorAll("[data-filter]").forEach(b=>b.classList.toggle("active",b.dataset.filter===filter))
+}
+function handleCode(raw){
+ const code=norm(raw);if(!code)return;
+ const item=batch.find(x=>code===x.awb||code.includes(x.awb));
+ if(!batch.length){setMsg("QR terbaca, tetapi batch belum dimuat. Muat CSV terlebih dahulu.","warn");return}
+ if(!item){setMsg("QR terbaca, tetapi AWB tidak cocok dengan batch: "+code+". Status tidak berubah.","bad");return}
+ if(scans[item.awb]){setMsg("Resi "+item.awb+" sudah pernah discan. Tidak dihitung dua kali.","warn");return}
+ scans[item.awb]={at:new Date().toISOString(),raw:code};localStorage.setItem(SCAN_KEY,JSON.stringify(scans));render();
+ $("lastAwb").textContent=item.awb;$("lastOrder").textContent=(item.order?"Order ID "+item.order+" · ":"")+(item.courier||"")+" · "+new Date().toLocaleTimeString("id-ID");$("last").style.display="block";
+ setMsg("Berhasil! "+item.awb+" berubah menjadi PACKED.","ok");if(navigator.vibrate)navigator.vibrate(120)
+}
+$("csvFile").addEventListener("change",async e=>{
+ const f=e.target.files[0];if(!f)return;
+ try{const next=parseCSV(await f.text());if(!next.length)throw Error("Tidak ada AWB valid dalam file.");batch=next;localStorage.setItem(BATCH_KEY,JSON.stringify(batch));const keep={};batch.forEach(x=>{if(scans[x.awb])keep[x.awb]=scans[x.awb]});scans=keep;localStorage.setItem(SCAN_KEY,JSON.stringify(scans));$("batchMsg").className="msg ok";$("batchMsg").textContent="Batch berhasil dimuat: "+batch.length+" AWB unik. Status awal PENDING.";render()}
+ catch(err){$("batchMsg").className="msg bad";$("batchMsg").textContent="Gagal membaca CSV: "+err.message}
+});
+async function startCamera(){
+ if(!window.isSecureContext){setMsg("Halaman belum HTTPS. Buka alamat https://...github.io","bad");return}
+ if(!navigator.mediaDevices?.getUserMedia){setMsg("Browser tidak menyediakan akses kamera. Coba Chrome Android terbaru.","bad");return}
+ if(typeof window.jsQR!=="function"){setMsg("QR decoder belum termuat. Periksa koneksi internet lalu refresh halaman.","bad");return}
+ try{
+  stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:"environment"},width:{ideal:1280},height:{ideal:720}}});
+  $("video").srcObject=stream;await $("video").play();$("cameraWrap").style.display="block";$("startBtn").disabled=true;$("stopBtn").disabled=false;running=true;setMsg("Kamera aktif. Arahkan QR resi ke kotak.","ok");scanLoop()
+ }catch(err){setMsg("Kamera gagal dibuka: "+(err.message||err)+". Pastikan izin kamera Chrome diberikan.","bad");stopCamera()}
+}
+function scanLoop(){
+ if(!running)return;
+ const v=$("video");
+ if(v.readyState>=2&&v.videoWidth){
+  const w=Math.min(v.videoWidth,900),h=Math.round(v.videoHeight*w/v.videoWidth);canvas.width=w;canvas.height=h;ctx.drawImage(v,0,0,w,h);
+  const img=ctx.getImageData(0,0,w,h),result=window.jsQR(img.data,w,h,{inversionAttempts:"attemptBoth"});
+  if(result&&result.data){const now=Date.now();if(result.data!==lastValue||now-lastTime>1800){lastValue=result.data;lastTime=now;handleCode(result.data)}}
+ }
+ if(running)requestAnimationFrame(scanLoop)
+}
+function stopCamera(){running=false;if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}$("video").srcObject=null;$("cameraWrap").style.display="none";$("startBtn").disabled=false;$("stopBtn").disabled=true}
+$("startBtn").addEventListener("click",startCamera);$("stopBtn").addEventListener("click",stopCamera);
+document.querySelectorAll("[data-filter]").forEach(b=>b.addEventListener("click",()=>{filter=b.dataset.filter;render()}));
+$("resetBtn").addEventListener("click",()=>{if(confirm("Reset semua hasil scan pada HP ini?")){scans={};localStorage.removeItem(SCAN_KEY);$("last").style.display="none";setMsg("Hasil scan direset. Semua resi kembali PENDING.");render()}});
+$("exportBtn").addEventListener("click",()=>{
+ const lines=["AWB,Order ID,Courier,Status,Scanned At"];
+ batch.forEach(x=>lines.push([x.awb,x.order,x.courier,scans[x.awb]?"PACKED":"PENDING",scans[x.awb]?.at||""].map(v=>'"'+String(v||"").replace(/"/g,'""')+'"').join(",")));
+ const blob=new Blob([lines.join("\n")],{type:"text/csv;charset=utf-8"}),a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="packing-trial-results.csv";a.click();URL.revokeObjectURL(a.href)
+});
+document.addEventListener("visibilitychange",()=>{if(document.hidden)stopCamera()});
+if(batch.length){$("batchMsg").className="msg ok";$("batchMsg").textContent="Batch tersimpan di HP ini: "+batch.length+" AWB unik."}
+render();
+</script></body></html>
