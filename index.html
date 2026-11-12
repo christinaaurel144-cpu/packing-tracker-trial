@@ -36,13 +36,14 @@ footer{font-size:10px;color:#8792a5;text-align:center;line-height:1.5;margin:18p
 @media(min-width:600px){body{padding:26px}.card{padding:19px}}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body><main class="app">
 <header><div><div class="brand">📦 Packing Tracker</div><div class="muted">Tes kamera QR resi · Batch lokal</div></div><div class="pill">CAMERA TRIAL</div></header>
 <section class="card">
 <h2>1. Muat batch resi</h2>
-<div class="muted">Pilih CSV batch yang sudah disiapkan. File diproses di HP dan tidak diunggah ke GitHub.</div>
-<label class="file">📄 Pilih packing-batch.csv<input id="csvFile" type="file" accept=".csv,text/csv"></label>
+<div class="muted">Pilih file Excel batch (.xlsx atau .xls) yang sudah disiapkan. File diproses di HP dan tidak diunggah ke GitHub.</div>
+<label class="file">📄 Pilih file Excel (.xlsx / .xls)<input id="excelFile" type="file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"></label>
 <div id="batchMsg" class="msg">Belum ada batch dimuat.</div>
 </section>
 <section class="card">
@@ -71,7 +72,7 @@ footer{font-size:10px;color:#8792a5;text-align:center;line-height:1.5;margin:18p
 <button class="secondary" data-filter="packed">Packed <span id="packedN">0</span></button>
 </div>
 <div class="tablewrap"><table><thead><tr><th>AWB</th><th>Kurir</th><th>Status</th></tr></thead><tbody id="rows"></tbody></table></div>
-<div class="actions"><button class="secondary" id="exportBtn">Export hasil CSV</button><button class="danger" id="resetBtn">Reset scan</button></div>
+<div class="actions"><button class="secondary" id="exportBtn">Export hasil Excel</button><button class="danger" id="resetBtn">Reset scan</button></div>
 </section>
 <footer>Trial ini menyimpan batch dan hasil scan di browser HP (localStorage). GitHub Pages hanya hosting HTTPS; belum ada sinkronisasi ke laptop admin. Jangan masukkan data pelanggan sensitif ke repository publik.</footer>
 </main>
@@ -80,14 +81,24 @@ const $=id=>document.getElementById(id),BATCH_KEY="packing-tracker-batch-v1",SCA
 let batch=[],scans={},stream=null,running=false,filter="all",lastValue="",lastTime=0,canvas=document.createElement("canvas"),ctx=canvas.getContext("2d",{willReadFrequently:true});
 try{batch=JSON.parse(localStorage.getItem(BATCH_KEY)||"[]");scans=JSON.parse(localStorage.getItem(SCAN_KEY)||"{}")}catch(e){batch=[];scans={}}
 const norm=v=>String(v||"").trim().toUpperCase().replace(/\s+/g,"");
-function parseCSV(t){
- let rows=[],row=[],cell="",q=false;
- for(let i=0;i<t.length;i++){let c=t[i],n=t[i+1];if(c==='"'&&q&&n==='"'){cell+='"';i++}else if(c==='"')q=!q;else if(c===','&&!q){row.push(cell);cell=""}else if((c==='\n'||c==='\r')&&!q){if(c==='\r'&&n==='\n')i++;row.push(cell);if(row.some(x=>x.trim()))rows.push(row);row=[];cell=""}else cell+=c}
- row.push(cell);if(row.some(x=>x.trim()))rows.push(row);if(!rows.length)return[];
- const h=rows.shift().map(x=>x.trim().toLowerCase().replace(/^\uFEFF/,""));
- const ai=h.findIndex(x=>["awb","tracking id","tracking number","no resi","resi"].includes(x)),oi=h.findIndex(x=>["order id","order_id"].includes(x)),ci=h.findIndex(x=>["courier","kurir","shipping provider"].includes(x));
- if(ai<0)throw Error("Kolom AWB tidak ditemukan. Pastikan CSV memiliki header AWB.");
- const m=new Map();rows.forEach(r=>{const a=norm(r[ai]);if(a&&!m.has(a))m.set(a,{awb:a,order:oi>=0?(r[oi]||""):"",courier:ci>=0?(r[ci]||""):""})});return [...m.values()]
+function parseExcel(buffer){
+ if(typeof XLSX==="undefined")throw Error("Library Excel belum termuat. Periksa koneksi internet lalu refresh halaman.");
+ const workbook=XLSX.read(buffer,{type:"array",cellText:true,cellDates:false});
+ const sheet=workbook.Sheets[workbook.SheetNames[0]];
+ if(!sheet)throw Error("Sheet Excel kosong.");
+ const rows=XLSX.utils.sheet_to_json(sheet,{header:1,raw:false,defval:"",blankrows:false});
+ if(!rows.length)return[];
+ const h=rows.shift().map(x=>String(x).trim().toLowerCase().replace(/^\\uFEFF/,""));
+ const ai=h.findIndex(x=>["awb","tracking id","tracking number","no resi","resi"].includes(x));
+ const oi=h.findIndex(x=>["order id","order_id"].includes(x));
+ const ci=h.findIndex(x=>["courier","kurir","shipping provider"].includes(x));
+ if(ai<0)throw Error("Kolom AWB tidak ditemukan. Pastikan sheet pertama memiliki header AWB.");
+ const m=new Map();
+ rows.forEach(r=>{
+  const a=norm(r[ai]);
+  if(a&&!m.has(a))m.set(a,{awb:a,order:oi>=0?String(r[oi]||""):"",courier:ci>=0?String(r[ci]||""):""});
+ });
+ return [...m.values()];
 }
 function setMsg(t,c=""){$("message").className="msg "+c;$("message").textContent=t}
 function render(){
@@ -105,17 +116,25 @@ function render(){
 function handleCode(raw){
  const code=norm(raw);if(!code)return;
  const item=batch.find(x=>code===x.awb||code.includes(x.awb));
- if(!batch.length){setMsg("QR terbaca, tetapi batch belum dimuat. Muat CSV terlebih dahulu.","warn");return}
+ if(!batch.length){setMsg("QR terbaca, tetapi batch belum dimuat. Muat file Excel terlebih dahulu.","warn");return}
  if(!item){setMsg("QR terbaca, tetapi AWB tidak cocok dengan batch: "+code+". Status tidak berubah.","bad");return}
  if(scans[item.awb]){setMsg("Resi "+item.awb+" sudah pernah discan. Tidak dihitung dua kali.","warn");return}
  scans[item.awb]={at:new Date().toISOString(),raw:code};localStorage.setItem(SCAN_KEY,JSON.stringify(scans));render();
  $("lastAwb").textContent=item.awb;$("lastOrder").textContent=(item.order?"Order ID "+item.order+" · ":"")+(item.courier||"")+" · "+new Date().toLocaleTimeString("id-ID");$("last").style.display="block";
  setMsg("Berhasil! "+item.awb+" berubah menjadi PACKED.","ok");if(navigator.vibrate)navigator.vibrate(120)
 }
-$("csvFile").addEventListener("change",async e=>{
+$("excelFile").addEventListener("change",async e=>{
  const f=e.target.files[0];if(!f)return;
- try{const next=parseCSV(await f.text());if(!next.length)throw Error("Tidak ada AWB valid dalam file.");batch=next;localStorage.setItem(BATCH_KEY,JSON.stringify(batch));const keep={};batch.forEach(x=>{if(scans[x.awb])keep[x.awb]=scans[x.awb]});scans=keep;localStorage.setItem(SCAN_KEY,JSON.stringify(scans));$("batchMsg").className="msg ok";$("batchMsg").textContent="Batch berhasil dimuat: "+batch.length+" AWB unik. Status awal PENDING.";render()}
- catch(err){$("batchMsg").className="msg bad";$("batchMsg").textContent="Gagal membaca CSV: "+err.message}
+ try{
+  const next=parseExcel(await f.arrayBuffer());
+  if(!next.length)throw Error("Tidak ada AWB valid dalam file Excel.");
+  batch=next;localStorage.setItem(BATCH_KEY,JSON.stringify(batch));
+  const keep={};batch.forEach(x=>{if(scans[x.awb])keep[x.awb]=scans[x.awb]});
+  scans=keep;localStorage.setItem(SCAN_KEY,JSON.stringify(scans));
+  $("batchMsg").className="msg ok";
+  $("batchMsg").textContent="File Excel berhasil dimuat: "+batch.length+" AWB unik. Status awal PENDING.";
+  render();
+ }catch(err){$("batchMsg").className="msg bad";$("batchMsg").textContent="Gagal membaca Excel: "+err.message}
 });
 async function startCamera(){
  if(!window.isSecureContext){setMsg("Halaman belum HTTPS. Buka alamat https://...github.io","bad");return}
@@ -141,9 +160,13 @@ $("startBtn").addEventListener("click",startCamera);$("stopBtn").addEventListene
 document.querySelectorAll("[data-filter]").forEach(b=>b.addEventListener("click",()=>{filter=b.dataset.filter;render()}));
 $("resetBtn").addEventListener("click",()=>{if(confirm("Reset semua hasil scan pada HP ini?")){scans={};localStorage.removeItem(SCAN_KEY);$("last").style.display="none";setMsg("Hasil scan direset. Semua resi kembali PENDING.");render()}});
 $("exportBtn").addEventListener("click",()=>{
- const lines=["AWB,Order ID,Courier,Status,Scanned At"];
- batch.forEach(x=>lines.push([x.awb,x.order,x.courier,scans[x.awb]?"PACKED":"PENDING",scans[x.awb]?.at||""].map(v=>'"'+String(v||"").replace(/"/g,'""')+'"').join(",")));
- const blob=new Blob([lines.join("\n")],{type:"text/csv;charset=utf-8"}),a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="packing-trial-results.csv";a.click();URL.revokeObjectURL(a.href)
+ if(typeof XLSX==="undefined"){setMsg("Library Excel belum termuat. Tidak bisa membuat file hasil.","bad");return}
+ const rows=[["AWB","Order ID","Courier","Status","Scanned At"]];
+ batch.forEach(x=>rows.push([x.awb,x.order,x.courier,scans[x.awb]?"PACKED":"PENDING",scans[x.awb]?.at||""]));
+ const ws=XLSX.utils.aoa_to_sheet(rows);
+ const wb=XLSX.utils.book_new();
+ XLSX.utils.book_append_sheet(wb,ws,"Hasil Packing");
+ XLSX.writeFile(wb,"packing-trial-results.xlsx");
 });
 document.addEventListener("visibilitychange",()=>{if(document.hidden)stopCamera()});
 if(batch.length){$("batchMsg").className="msg ok";$("batchMsg").textContent="Batch tersimpan di HP ini: "+batch.length+" AWB unik."}
